@@ -1,0 +1,299 @@
+import Foundation
+import os
+
+private let logger = Logger(subsystem: "com.pettypeless.app", category: "ServerConnection")
+
+/// Manages the shared WebSocket connection to the Relay Server.
+///
+/// Both CloudASREngine and CloudRewriteService use this connection.
+/// Handles connection lifecycle, reconnection, and message routing.
+final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
+
+    // MARK: - Configuration
+
+    private var serverURL: URL
+    private var apiToken: String
+
+    // MARK: - Connection
+
+    private var webSocket: URLSessionWebSocketTask?
+    private var urlSession: URLSession?
+    private let wsQueue = DispatchQueue(label: "com.pettypeless.connection", qos: .userInitiated)
+
+    // MARK: - State
+
+    private(set) var isConnected = false
+    private var reconnectAttempts = 0
+    private static let maxReconnectAttempts = 5
+    private static let reconnectBaseDelay: TimeInterval = 1.0
+
+    // MARK: - Message Routing
+
+    /// Callback for ASR partial results
+    var onPartialResult: ((String) -> Void)?
+    /// Callback for ASR final results
+    var onFinalResult: ((String) -> Void)?
+    /// Connection state change callback
+    var onConnectionStateChanged: ((Bool) -> Void)?
+
+    /// Pending rewrite continuations (keyed by request ID)
+    private var rewriteContinuations: [String: CheckedContinuation<String, Error>] = [:]
+    private let continuationLock = NSLock()
+
+    // MARK: - Init
+
+    init(serverURL: URL, apiToken: String) {
+        self.serverURL = serverURL
+        self.apiToken = apiToken
+        super.init()
+    }
+
+    // MARK: - Configuration Update
+
+    func updateConfig(serverURL: URL, apiToken: String) {
+        self.serverURL = serverURL
+        self.apiToken = apiToken
+        // Reconnect with new config
+        disconnect()
+        connect()
+    }
+
+    // MARK: - Connection Management
+
+    func connect() {
+        wsQueue.async { [weak self] in
+            self?._connect()
+        }
+    }
+
+    private func _connect() {
+        // Clean up existing connection
+        webSocket?.cancel(with: .goingAway, reason: nil)
+
+        // Build URL with token
+        var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)!
+        var queryItems = components.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "token", value: apiToken))
+        components.queryItems = queryItems
+
+        guard let url = components.url else {
+            logger.error("Invalid server URL: \(self.serverURL.absoluteString, privacy: .public)")
+            return
+        }
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 300
+
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        webSocket = urlSession?.webSocketTask(with: url)
+        webSocket?.resume()
+
+        logger.info("Connecting to \(url.host() ?? "unknown", privacy: .public):\(url.port ?? 0)")
+        receiveMessage()
+    }
+
+    func disconnect() {
+        wsQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.webSocket?.cancel(with: .goingAway, reason: nil)
+            self.webSocket = nil
+            self.urlSession?.invalidateAndCancel()
+            self.urlSession = nil
+            self.isConnected = false
+
+            // Cancel all pending rewrite continuations
+            self.continuationLock.lock()
+            let continuations = self.rewriteContinuations
+            self.rewriteContinuations.removeAll()
+            self.continuationLock.unlock()
+
+            for (_, continuation) in continuations {
+                continuation.resume(throwing: ConnectionError.disconnected)
+            }
+        }
+    }
+
+    // MARK: - Sending Messages
+
+    func sendStartSession() {
+        let msg = #"{"type":"start_session"}"#
+        send(text: msg)
+    }
+
+    func sendEndSession() {
+        let msg = #"{"type":"end_session"}"#
+        send(text: msg)
+    }
+
+    func sendAudioData(_ data: Data) {
+        webSocket?.send(.data(data)) { error in
+            if let error = error {
+                logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Send a rewrite request and await the result.
+    func sendRewriteRequest(text: String) async throws -> String {
+        let requestId = UUID().uuidString
+
+        return try await withCheckedThrowingContinuation { continuation in
+            continuationLock.lock()
+            rewriteContinuations[requestId] = continuation
+            continuationLock.unlock()
+
+            let payload: [String: Any] = [
+                "type": "rewrite",
+                "text": text,
+                "request_id": requestId
+            ]
+
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else {
+                continuationLock.lock()
+                rewriteContinuations.removeValue(forKey: requestId)
+                continuationLock.unlock()
+                continuation.resume(throwing: ConnectionError.serializationFailed)
+                return
+            }
+
+            send(text: jsonString)
+        }
+    }
+
+    private func send(text: String) {
+        webSocket?.send(.string(text)) { error in
+            if let error = error {
+                logger.error("Failed to send message: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    // MARK: - Receiving Messages
+
+    private func receiveMessage() {
+        webSocket?.receive { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleTextMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleTextMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+                self.receiveMessage()
+
+            case .failure(let error):
+                logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
+                self.handleDisconnect()
+            }
+        }
+    }
+
+    private func handleTextMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            logger.warning("Invalid message: \(text.prefix(100), privacy: .public)")
+            return
+        }
+
+        switch type {
+        case "partial":
+            if let resultText = json["text"] as? String {
+                onPartialResult?(resultText)
+            }
+
+        case "final":
+            let resultText = json["text"] as? String ?? ""
+            logger.info("Final ASR result: \(resultText.prefix(80), privacy: .public)")
+            onFinalResult?(resultText)
+
+        case "rewrite_result":
+            let resultText = json["text"] as? String ?? ""
+            let requestId = json["request_id"] as? String ?? ""
+
+            continuationLock.lock()
+            let continuation = rewriteContinuations.removeValue(forKey: requestId)
+            continuationLock.unlock()
+
+            if let continuation = continuation {
+                continuation.resume(returning: resultText)
+            } else {
+                logger.warning("Received rewrite_result for unknown request_id: \(requestId, privacy: .public)")
+            }
+
+        case "error":
+            let errorMsg = json["message"] as? String ?? "Unknown error"
+            logger.error("Server error: \(errorMsg, privacy: .public)")
+
+        default:
+            logger.debug("Unknown message type: \(type, privacy: .public)")
+        }
+    }
+
+    // MARK: - Reconnection
+
+    private func handleDisconnect() {
+        isConnected = false
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onConnectionStateChanged?(false)
+        }
+
+        // Cancel pending rewrite continuations
+        continuationLock.lock()
+        let continuations = rewriteContinuations
+        rewriteContinuations.removeAll()
+        continuationLock.unlock()
+
+        for (_, continuation) in continuations {
+            continuation.resume(throwing: ConnectionError.disconnected)
+        }
+
+        guard reconnectAttempts < Self.maxReconnectAttempts else {
+            logger.error("Max reconnect attempts reached (\(Self.maxReconnectAttempts))")
+            return
+        }
+
+        reconnectAttempts += 1
+        let delay = Self.reconnectBaseDelay * pow(2.0, Double(reconnectAttempts - 1))
+        logger.info("Reconnecting in \(delay, privacy: .public)s (attempt \(self.reconnectAttempts)/\(Self.maxReconnectAttempts))")
+
+        wsQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?._connect()
+        }
+    }
+
+    // MARK: - URLSessionWebSocketDelegate
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        logger.info("WebSocket connected")
+        isConnected = true
+        reconnectAttempts = 0
+
+        DispatchQueue.main.async { [weak self] in
+            self?.onConnectionStateChanged?(true)
+        }
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
+        logger.info("WebSocket closed: code=\(closeCode.rawValue) reason=\(reasonStr, privacy: .public)")
+        handleDisconnect()
+    }
+}
+
+// MARK: - Errors
+
+enum ConnectionError: Error {
+    case disconnected
+    case serializationFailed
+}
