@@ -1,0 +1,102 @@
+// Container Apps Environment + Container App for pet-typeless-server.
+//
+// Runs the relay server with WebSocket support, scaled 0–1 replicas.
+// All sensitive values are injected via Container Apps secrets.
+
+param location string
+
+// Log Analytics (for Container Apps Environment)
+param logAnalyticsCustomerId string
+param logAnalyticsSharedKey string
+
+// ACR credentials
+param acrLoginServer string
+param acrUsername string
+@secure()
+param acrPassword string
+
+// Application secrets
+@secure()
+param azureSpeechKey string
+param azureSpeechRegion string
+@secure()
+param azureOpenAiApiKey string
+param azureOpenAiEndpoint string
+param azureOpenAiDeployment string
+param azureOpenAiApiVersion string
+@secure()
+param apiToken string
+
+// ── Container Apps Environment ──────────────────────────────────
+
+resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: 'pet-typeless-env'
+  location: location
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalyticsCustomerId
+        sharedKey: logAnalyticsSharedKey
+      }
+    }
+  }
+}
+
+// ── Container App ───────────────────────────────────────────────
+
+resource app 'Microsoft.App/containerApps@2024-03-01' = {
+  name: 'pet-typeless-server'
+  location: location
+  properties: {
+    managedEnvironmentId: env.id
+    configuration: {
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'auto'
+      }
+      registries: [
+        {
+          server: acrLoginServer
+          username: acrUsername
+          passwordSecretRef: 'acr-password'
+        }
+      ]
+      secrets: [
+        { name: 'acr-password', value: acrPassword }
+        { name: 'azure-speech-key', value: azureSpeechKey }
+        { name: 'azure-openai-api-key', value: azureOpenAiApiKey }
+        { name: 'api-token', value: apiToken }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'pet-typeless-server'
+          image: '${acrLoginServer}/pet-typeless-server:latest'
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'AZURE_SPEECH_KEY', secretRef: 'azure-speech-key' }
+            { name: 'AZURE_SPEECH_REGION', value: azureSpeechRegion }
+            { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
+            { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
+            { name: 'AZURE_OPENAI_DEPLOYMENT', value: azureOpenAiDeployment }
+            { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
+            { name: 'API_TOKEN', secretRef: 'api-token' }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 1
+      }
+    }
+  }
+}
+
+@description('Container App FQDN (e.g. pet-typeless-server.<hash>.eastasia.azurecontainerapps.io).')
+output fqdn string = app.properties.configuration.ingress.fqdn
