@@ -188,6 +188,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await asr_session.stop()
             logger.info("WebSocket cleanup complete (client=%s)", websocket.client)
 
+    return app
+
 
 # ── CLI entry point ───────────────────────────────────────────
 
