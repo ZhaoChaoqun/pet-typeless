@@ -5,8 +5,8 @@ private let logger = Logger(subsystem: "com.pettypeless.app", category: "PostPro
 
 /// Simplified post-processing pipeline for PetTypeless.
 ///
-/// Since ASR and rewrite are both handled server-side, this pipeline is much simpler
-/// than Nano Typeless's version. It only handles the CloudRewrite step.
+/// Since ASR and rewrite are both handled server-side, this pipeline only
+/// handles the CloudRewrite step.
 final class PostProcessingPipeline {
 
     let processingQueue: DispatchQueue

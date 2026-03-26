@@ -5,16 +5,14 @@ private let cloudRewriteLogger = Logger(subsystem: "com.pettypeless.app", catego
 
 /// Cloud rewrite service that sends text to the Relay Server for LLM-based rewriting.
 ///
-/// Instead of calling Azure OpenAI directly, this sends a WebSocket message
-/// `{"type":"rewrite","text":"..."}` and waits for `{"type":"rewrite_result","text":"..."}`.
-///
-/// Shares the same WebSocket connection as CloudASREngine.
+/// Sends a WebSocket message `{"type":"rewrite","text":"..."}` and waits for
+/// `{"type":"rewrite_result","text":"..."}` from the Server.
 final class CloudRewriteService {
 
     /// Wall-clock timeout for the entire rewrite operation.
     private static let rewriteTimeout: Duration = .seconds(5)
 
-    /// Reference to the WebSocket task (shared with CloudASREngine via ServerConnection)
+    /// Reference to the shared WebSocket connection
     private weak var connection: ServerConnection?
 
     init(connection: ServerConnection) {
