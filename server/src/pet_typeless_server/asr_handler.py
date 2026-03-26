@@ -104,7 +104,9 @@ class ASRSession:
         self._recognizer.canceled.connect(self._on_canceled)
         self._recognizer.session_stopped.connect(self._on_session_stopped)
 
-        self._recognizer.start_continuous_recognition_async().get()
+        await asyncio.to_thread(
+            self._recognizer.start_continuous_recognition_async().get
+        )
         self._started = True
         logger.info("ASR session started (language=%s)", self._language)
 
@@ -131,7 +133,9 @@ class ASRSession:
         # Stop continuous recognition.
         if self._recognizer is not None:
             try:
-                self._recognizer.stop_continuous_recognition_async().get()
+                await asyncio.to_thread(
+                    self._recognizer.stop_continuous_recognition_async().get
+                )
             except Exception as exc:
                 logger.warning("Error stopping recognizer: %s", exc)
             self._recognizer = None

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from openai import AsyncAzureOpenAI
@@ -38,6 +39,9 @@ SYSTEM_PROMPT = """\
 
 class RewriteHandler:
     """Handles rewrite requests via Azure OpenAI."""
+
+    # Maximum input text length (in characters) to prevent token abuse.
+    MAX_INPUT_LENGTH = 5000
 
     def __init__(
         self,
@@ -69,6 +73,14 @@ class RewriteHandler:
         """
         trimmed = text.strip()
         if not trimmed:
+            return text
+
+        if len(trimmed) > self.MAX_INPUT_LENGTH:
+            logger.warning(
+                "Rewrite input too long (%d chars, max %d), returning original",
+                len(trimmed),
+                self.MAX_INPUT_LENGTH,
+            )
             return text
 
         try:
@@ -117,8 +129,6 @@ class RewriteHandler:
     @staticmethod
     def _remove_think_blocks(content: str) -> str:
         """Remove <think>...</think> blocks from model output."""
-        import re
-
         return re.sub(r"<think>[\s\S]*?</think>\s*", "", content).strip()
 
     async def close(self) -> None:
