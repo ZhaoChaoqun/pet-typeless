@@ -16,9 +16,13 @@ Protocol:
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import json
 import logging
 import sys
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -40,15 +44,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = load_settings()
 
-    app = FastAPI(
-        title="PetTypeless Relay Server",
-        version="0.1.0",
-        description="Proxies client audio to Azure Speech SDK and rewrites via Azure OpenAI.",
-    )
-
-    # Stash settings on the app for access in routes
-    app.state.settings = settings  # type: ignore[attr-defined]
-
     # Create a shared RewriteHandler (holds an AsyncAzureOpenAI client)
     rewrite = RewriteHandler(
         api_key=settings.azure_openai_api_key,
@@ -57,11 +52,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         api_version=settings.azure_openai_api_version,
         timeout=settings.rewrite_timeout,
     )
-    app.state.rewrite = rewrite  # type: ignore[attr-defined]
 
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Startup: nothing extra needed
+        yield
+        # Shutdown: release the OpenAI HTTP client
         await rewrite.close()
+
+    app = FastAPI(
+        title="PetTypeless Relay Server",
+        version="0.1.0",
+        description="Proxies client audio to Azure Speech SDK and rewrites via Azure OpenAI.",
+        lifespan=lifespan,
+    )
+
+    # Stash settings on the app for access in routes
+    app.state.settings = settings  # type: ignore[attr-defined]
+    app.state.rewrite = rewrite  # type: ignore[attr-defined]
 
     # ── Health check ──────────────────────────────────────────
 
@@ -76,8 +84,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         websocket: WebSocket,
         token: str = Query(default=""),
     ) -> None:
-        # Authenticate
-        if not token or token != settings.api_token:
+        # Authenticate — constant-time comparison to prevent timing attacks
+        if not token or not hmac.compare_digest(token, settings.api_token):
             await websocket.close(code=1008, reason="Invalid or missing API token")
             return
 
@@ -96,6 +104,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def _on_asr_result(event_type: str, text: str) -> None:
             """Callback from ASRSession — forward to WebSocket."""
             await _send_json({"type": event_type, "text": text})
+
+        async def _handle_rewrite(text: str) -> None:
+            """Run rewrite in background and send result when done."""
+            result = await rewrite.rewrite(text)
+            await _send_json({"type": "rewrite_result", "text": result})
 
         try:
             while True:
@@ -148,14 +161,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         await _send_json({"type": "session_ended"})
 
                     elif msg_type == "rewrite":
-                        # Rewrite request
+                        # Rewrite request — run asynchronously to avoid
+                        # blocking the WS receive loop
                         text = payload.get("text", "")
                         if text:
-                            result = await rewrite.rewrite(text)
-                            await _send_json({
-                                "type": "rewrite_result",
-                                "text": result,
-                            })
+                            asyncio.create_task(_handle_rewrite(text))
                         else:
                             await _send_json({
                                 "type": "error",
@@ -177,6 +187,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if asr_session is not None:
                 await asr_session.stop()
             logger.info("WebSocket cleanup complete (client=%s)", websocket.client)
+
+    return app
 
 
 # ── CLI entry point ───────────────────────────────────────────
