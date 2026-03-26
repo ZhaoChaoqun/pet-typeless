@@ -5,8 +5,14 @@ private let logger = Logger(subsystem: "com.pettypeless.app", category: "ServerC
 
 /// Manages the shared WebSocket connection to the Relay Server.
 ///
-/// Both CloudASREngine and CloudRewriteService use this connection.
+/// RecordingManager uses this for ASR (start/end session, audio streaming),
+/// and CloudRewriteService uses it for text rewriting.
 /// Handles connection lifecycle, reconnection, and message routing.
+///
+/// Thread safety:
+/// - `isConnected` and `reconnectAttempts` are protected by `stateLock`.
+/// - WebSocket operations are dispatched on `wsQueue` (serial).
+/// - Rewrite continuations are protected by `continuationLock`.
 final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Configuration
@@ -20,10 +26,24 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     private var urlSession: URLSession?
     private let wsQueue = DispatchQueue(label: "com.pettypeless.connection", qos: .userInitiated)
 
-    // MARK: - State
+    // MARK: - Thread-safe State
 
-    private(set) var isConnected = false
-    private var reconnectAttempts = 0
+    private var _isConnected = false
+    private var _reconnectAttempts = 0
+    private let stateLock = NSLock()
+
+    private(set) var isConnected: Bool {
+        get { stateLock.withLock { _isConnected } }
+        set {
+            stateLock.withLock { _isConnected = newValue }
+        }
+    }
+
+    private var reconnectAttempts: Int {
+        get { stateLock.withLock { _reconnectAttempts } }
+        set { stateLock.withLock { _reconnectAttempts = newValue } }
+    }
+
     private static let maxReconnectAttempts = 5
     private static let reconnectBaseDelay: TimeInterval = 1.0
 
@@ -53,7 +73,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     func updateConfig(serverURL: URL, apiToken: String) {
         self.serverURL = serverURL
         self.apiToken = apiToken
-        // Reconnect with new config
         disconnect()
         connect()
     }
@@ -69,6 +88,7 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     private func _connect() {
         // Clean up existing connection
         webSocket?.cancel(with: .goingAway, reason: nil)
+        urlSession?.invalidateAndCancel()
 
         // Build URL with token
         var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)!
@@ -258,14 +278,15 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
             continuation.resume(throwing: ConnectionError.disconnected)
         }
 
-        guard reconnectAttempts < Self.maxReconnectAttempts else {
+        let currentAttempts = reconnectAttempts
+        guard currentAttempts < Self.maxReconnectAttempts else {
             logger.error("Max reconnect attempts reached (\(Self.maxReconnectAttempts))")
             return
         }
 
-        reconnectAttempts += 1
-        let delay = Self.reconnectBaseDelay * pow(2.0, Double(reconnectAttempts - 1))
-        logger.info("Reconnecting in \(delay, privacy: .public)s (attempt \(self.reconnectAttempts)/\(Self.maxReconnectAttempts))")
+        reconnectAttempts = currentAttempts + 1
+        let delay = Self.reconnectBaseDelay * pow(2.0, Double(currentAttempts))
+        logger.info("Reconnecting in \(delay, privacy: .public)s (attempt \(currentAttempts + 1)/\(Self.maxReconnectAttempts))")
 
         wsQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
             self?._connect()

@@ -22,14 +22,15 @@ class RecordingManager {
     private var postProcessingPipeline: PostProcessingPipeline
 
     /// 所有状态变更必须且只能通过此队列
-    private let stateQueue = DispatchQueue(label: "com.pettypeless.state")
+    private let stateQueue = DispatchQueue(label: "com.pettypless.state")
     private var state: RecordingState = .idle
 
     /// 计算密集型操作的队列
     private let processingQueue = DispatchQueue(label: "com.pettypeless.processing", qos: .userInitiated)
 
-    /// Whether a recording session is active on the server
-    private var isSessionActive = false
+    /// Flushing timeout — auto-recover if server never sends "final"
+    private var flushTimeoutWorkItem: DispatchWorkItem?
+    private static let flushTimeoutSeconds: TimeInterval = 8.0
 
     // MARK: - 公开回调
 
@@ -72,6 +73,7 @@ class RecordingManager {
         }
 
         serverConnection.onFinalResult = { [weak self] text in
+            self?.cancelFlushTimeout()
             self?.handleEvent(.flushComplete(rawText: text))
         }
 
@@ -123,6 +125,26 @@ class RecordingManager {
         handleEvent(.reloadRequested)
     }
 
+    // MARK: - Flushing Timeout
+
+    private func startFlushTimeout() {
+        cancelFlushTimeout()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            logger.warning("Flush timeout (\(Self.flushTimeoutSeconds)s) — auto-recovering")
+            // Fire flushComplete with empty text to recover the FSM
+            self.handleEvent(.flushComplete(rawText: ""))
+        }
+        flushTimeoutWorkItem = workItem
+        stateQueue.asyncAfter(deadline: .now() + Self.flushTimeoutSeconds, execute: workItem)
+    }
+
+    private func cancelFlushTimeout() {
+        flushTimeoutWorkItem?.cancel()
+        flushTimeoutWorkItem = nil
+    }
+
     // MARK: - 副作用处理
 
     private func handleSideEffects(from oldState: RecordingState, to newState: RecordingState, event: RecordingEvent) {
@@ -143,11 +165,11 @@ class RecordingManager {
         case (.recording, .flushing):
             DispatchQueue.main.async { self.onProcessingStarted?() }
             audioEngineManager.stop()
-            // Send end_session to server — the "final" response will trigger flushComplete
             serverConnection.sendEndSession()
-            isSessionActive = false
+            startFlushTimeout()
 
         case (.flushing, .postProcessing(let rawText)):
+            cancelFlushTimeout()
             postProcessingPipeline.process(rawText: rawText) { [weak self] finalText in
                 self?.handleEvent(.postProcessComplete(finalText: finalText))
             }
@@ -170,8 +192,6 @@ class RecordingManager {
         }
         audioEngineManager.start()
 
-        // Start a new ASR session on the server
-        isSessionActive = true
         serverConnection.sendStartSession()
 
         logger.info("开始云端录音")

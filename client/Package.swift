@@ -9,7 +9,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PetTypeless",
-            path: "Sources"
+            path: "Sources",
+            exclude: ["PetTypeless.entitlements"]
         )
     ]
 )
