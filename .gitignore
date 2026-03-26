@@ -25,3 +25,10 @@ uv.lock
 # Azure Speech SDK
 *.so
 *.dylib
+
+# Swift
+.build/
+.swiftpm/
+xcuserdata/
+DerivedData/
+*.xcworkspace
