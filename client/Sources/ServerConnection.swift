@@ -45,7 +45,11 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     }
 
     private static let maxReconnectAttempts = 5
-    private static let reconnectBaseDelay: TimeInterval = 1.0
+    private static let reconnectBaseDelay: TimeInterval = 2.0
+
+    // MARK: - Keep-alive
+
+    private var pingTimer: DispatchSourceTimer?
 
     // MARK: - Message Routing
 
@@ -87,6 +91,7 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
 
     private func _connect() {
         // Clean up existing connection
+        stopPing()
         webSocket?.cancel(with: .goingAway, reason: nil)
         urlSession?.invalidateAndCancel()
 
@@ -102,8 +107,8 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
         }
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 300
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 0  // no resource timeout
 
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         webSocket = urlSession?.webSocketTask(with: url)
@@ -116,6 +121,7 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     func disconnect() {
         wsQueue.async { [weak self] in
             guard let self = self else { return }
+            self.stopPing()
             self.webSocket?.cancel(with: .goingAway, reason: nil)
             self.webSocket = nil
             self.urlSession?.invalidateAndCancel()
@@ -132,6 +138,28 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
                 continuation.resume(throwing: ConnectionError.disconnected)
             }
         }
+    }
+
+    // MARK: - Keep-alive Ping
+
+    private func startPing() {
+        stopPing()
+        let timer = DispatchSource.makeTimerSource(queue: wsQueue)
+        timer.schedule(deadline: .now() + 15, repeating: 15)
+        timer.setEventHandler { [weak self] in
+            self?.webSocket?.sendPing { error in
+                if let error = error {
+                    logger.warning("Ping failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+        timer.resume()
+        pingTimer = timer
+    }
+
+    private func stopPing() {
+        pingTimer?.cancel()
+        pingTimer = nil
     }
 
     // MARK: - Sending Messages
@@ -262,6 +290,7 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     // MARK: - Reconnection
 
     private func handleDisconnect() {
+        stopPing()
         isConnected = false
 
         DispatchQueue.main.async { [weak self] in
@@ -299,6 +328,7 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
         logger.info("WebSocket connected")
         isConnected = true
         reconnectAttempts = 0
+        startPing()
 
         DispatchQueue.main.async { [weak self] in
             self?.onConnectionStateChanged?(true)
