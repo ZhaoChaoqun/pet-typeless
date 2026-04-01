@@ -127,7 +127,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             resource_id=settings.doubao_resource_id,
                         )
                         await asr_session.start(on_result=_on_asr_result)
-                        await _send_json({"type": "session_started"})
+                        if asr_session.is_active:
+                            await _send_json({"type": "session_started"})
 
                     elif msg_type == "end_session":
                         # Stop ASR session
