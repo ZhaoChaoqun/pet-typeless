@@ -3,46 +3,31 @@ import os
 
 private let logger = Logger(subsystem: "com.pettypeless.app", category: "PostProcessingPipeline")
 
-/// Simplified post-processing pipeline for PetTypeless.
+/// Post-processing pipeline for PetTypeless.
 ///
-/// Since ASR and rewrite are both handled server-side, this pipeline only
-/// handles the CloudRewrite step.
+/// With 豆包 bigmodel_async ASR handling ITN and punctuation server-side,
+/// this pipeline is a simple pass-through. Kept as an extension point for
+/// future local post-processing steps (e.g., custom term replacement).
 final class PostProcessingPipeline {
 
     let processingQueue: DispatchQueue
-    private let cloudRewriteService: CloudRewriteService
 
-    init(processingQueue: DispatchQueue, cloudRewriteService: CloudRewriteService) {
+    init(processingQueue: DispatchQueue) {
         self.processingQueue = processingQueue
-        self.cloudRewriteService = cloudRewriteService
     }
 
-    /// Process raw ASR text through the cloud rewrite pipeline.
-    ///
-    /// Pipeline: Raw ASR text → CloudRewrite (Server-side LLM) → Final text
-    ///
-    /// All local processing steps (TermNorm, ITN, CSC, Punctuation) are removed
-    /// because the server-side Azure ASR handles punctuation and the rewrite
-    /// handles formatting.
+    /// Process ASR text. Currently a pass-through since 豆包 ASR
+    /// handles ITN + punctuation server-side.
     func process(rawText: String, completion: @escaping (String?) -> Void) {
-        processingQueue.async { [weak self] in
-            guard let self = self else { return }
-
+        processingQueue.async {
             guard !rawText.isEmpty else {
                 logger.info("最终识别结果: （无）")
                 completion(nil)
                 return
             }
 
-            // Cloud rewrite via Server
-            Task { [weak self] in
-                guard let self = self else { return }
-                let rewrittenText = await self.cloudRewriteService.rewriteOrPassthrough(rawText)
-                self.processingQueue.async {
-                    logger.info("最终结果: \(rewrittenText, privacy: .public)")
-                    completion(rewrittenText)
-                }
-            }
+            logger.info("最终结果: \(rawText, privacy: .public)")
+            completion(rawText)
         }
     }
 }

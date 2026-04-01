@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: "com.pettypeless.app", category: "Recordi
 /// Thin coordinator that owns the FSM and delegates to focused subsystems:
 /// - `AudioEngineManager` — microphone capture
 /// - `ServerConnection` — WebSocket connection to Relay Server
-/// - `PostProcessingPipeline` — CloudRewrite via Server
+/// - `PostProcessingPipeline` — pass-through (extension point for future local processing)
 ///
 /// Thread safety:
 /// - All state transitions happen on `stateQueue` (serial).
@@ -48,10 +48,8 @@ class RecordingManager {
         let token = ServerConfig.apiToken
 
         serverConnection = ServerConnection(serverURL: url, apiToken: token)
-        let cloudRewriteService = CloudRewriteService(connection: serverConnection)
         postProcessingPipeline = PostProcessingPipeline(
-            processingQueue: processingQueue,
-            cloudRewriteService: cloudRewriteService
+            processingQueue: processingQueue
         )
 
         setupServerCallbacks()
