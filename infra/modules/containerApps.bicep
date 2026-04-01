@@ -7,6 +7,7 @@ param location string
 
 // Log Analytics (for Container Apps Environment)
 param logAnalyticsCustomerId string
+@secure()
 param logAnalyticsSharedKey string
 
 // ACR credentials

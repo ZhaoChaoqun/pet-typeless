@@ -15,6 +15,9 @@
 #   DOUBAO_APP_KEY     — 豆包 ASR app key
 #   DOUBAO_ACCESS_KEY  — 豆包 ASR access key
 #   API_TOKEN          — Client authentication token
+#
+# Environment variables (optional):
+#   DOUBAO_RESOURCE_ID — 豆包 resource ID (default: volc.bigasr.sauc.duration)
 
 set -euo pipefail
 
