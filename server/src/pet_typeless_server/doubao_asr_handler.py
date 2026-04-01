@@ -71,6 +71,7 @@ class DoubaoASRSession:
         self._ws: websockets.ClientConnection | None = None
         self._on_result: ResultCallback | None = None
         self._started = False
+        self._error_fired = False
 
         # 音频发送队列，None 作为 sentinel 表示停止
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
@@ -99,6 +100,7 @@ class DoubaoASRSession:
 
         self._on_result = on_result
         self._definite_texts = []
+        self._error_fired = False
         self._start_time = time.monotonic()
         self._first_audio_time = 0
         self._first_result_time = 0
@@ -389,6 +391,13 @@ class DoubaoASRSession:
                     if final_text and not handled_final:
                         await self._fire_callback("final", final_text)
                     break
+            else:
+                # for 循环 2000 次迭代耗尽，仍未收到 is_final
+                logger.error("Receiver: hit max iteration limit (2000)")
+                self._started = False
+                await self._fire_callback(
+                    "error", "Receiver exceeded max response limit"
+                )
 
         except websockets.exceptions.ConnectionClosed as exc:
             logger.warning(
@@ -472,9 +481,18 @@ class DoubaoASRSession:
         return fired_final
 
     async def _fire_callback(self, event_type: str, text: str) -> None:
-        """安全地调用回调函数."""
-        if self._on_result is not None:
-            try:
-                await self._on_result(event_type, text)
-            except Exception as exc:
-                logger.warning("Callback error (%s): %s", event_type, exc)
+        """安全地调用回调函数.
+
+        Error 回调是幂等的——多次调用（如 sender 和 receiver 都捕获到
+        ConnectionClosed）只会向客户端发送第一次。
+        """
+        if self._on_result is None:
+            return
+        if event_type == "error":
+            if self._error_fired:
+                return
+            self._error_fired = True
+        try:
+            await self._on_result(event_type, text)
+        except Exception as exc:
+            logger.warning("Callback error (%s): %s", event_type, exc)
