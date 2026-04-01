@@ -171,7 +171,12 @@ class DoubaoASRSession:
         logger.info("Stopping ASR session (audio_received=%.1fKB, packets_sent=%d)",
                      self._audio_bytes_received / 1024, self._audio_packets_sent)
 
-        # 发送停止信号给 sender
+        # 清空队列再发停止信号，防止队列满时 QueueFull
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         self._audio_queue.put_nowait(None)
 
         # 等待 sender 完成
