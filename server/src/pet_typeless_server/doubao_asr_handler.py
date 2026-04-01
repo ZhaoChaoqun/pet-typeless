@@ -4,12 +4,9 @@
 ASR 服务器之间的完整双向流式通信生命周期。
 
 生命周期：
-  1. ``start(on_result)`` — 连接豆包、发送初始化请求、启动 sender 任务
+  1. ``start(on_result)`` — 连接豆包、发送初始化请求、启动 sender/receiver 任务
   2. ``push_audio(data)`` — 将客户端 Float32 音频放入发送队列
-  3. ``stop()`` — 发送结束标志、等待任务完成、清理资源
-
-本 PR 只包含 session 骨架和 sender（音频发送）逻辑。
-receiver（响应接收 + 回调）将在下个 PR 中添加。
+  3. ``stop()`` — 发送结束标志、等待最终结果、清理资源
 """
 
 from __future__ import annotations
@@ -26,6 +23,7 @@ from .doubao_protocol import (
     build_audio_packet,
     build_full_client_request,
     float32_bytes_to_pcm16_bytes,
+    parse_server_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +43,9 @@ SEND_INTERVAL = 0.2
 
 # 音频队列最大容量（约 100 个 PCM16 chunk ≈ 20s 音频 @ 200ms/chunk）
 AUDIO_QUEUE_MAXSIZE = 100
+
+# 等待豆包响应的超时（秒）
+RECV_TIMEOUT = 30.0
 
 # stop() 等待 sender/receiver 完成的超时（秒）
 STOP_TIMEOUT = 15.0
@@ -70,15 +71,22 @@ class DoubaoASRSession:
         self._ws: websockets.ClientConnection | None = None
         self._on_result: ResultCallback | None = None
         self._started = False
+        self._error_fired = False
 
         # 音频发送队列，None 作为 sentinel 表示停止
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
             maxsize=AUDIO_QUEUE_MAXSIZE
         )
         self._sender_task: asyncio.Task | None = None
+        self._receiver_task: asyncio.Task | None = None
+
+        # 已确定的分句文本（definite utterances 按序累积）
+        self._definite_texts: list[str] = []
 
         # 性能计时
         self._start_time: float = 0
+        self._first_audio_time: float = 0
+        self._first_result_time: float = 0
         self._audio_bytes_received: int = 0
         self._audio_packets_sent: int = 0
 
@@ -91,7 +99,11 @@ class DoubaoASRSession:
             return
 
         self._on_result = on_result
+        self._definite_texts = []
+        self._error_fired = False
         self._start_time = time.monotonic()
+        self._first_audio_time = 0
+        self._first_result_time = 0
         self._audio_bytes_received = 0
         self._audio_packets_sent = 0
         self._audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
@@ -139,8 +151,9 @@ class DoubaoASRSession:
             await self._fire_callback("error", f"Init request failed: {exc}")
             return
 
-        # 启动 sender 协程
+        # 启动 sender 和 receiver 协程
         self._sender_task = asyncio.create_task(self._sender_loop())
+        self._receiver_task = asyncio.create_task(self._receiver_loop())
 
         self._started = True
         logger.info("Doubao ASR session started (connect_id=%s)", connect_id)
@@ -149,6 +162,9 @@ class DoubaoASRSession:
         """将客户端 Float32 PCM 音频推入发送队列."""
         if not self._started:
             return
+
+        if not self._first_audio_time:
+            self._first_audio_time = time.monotonic()
 
         self._audio_bytes_received += len(data)
 
@@ -171,7 +187,8 @@ class DoubaoASRSession:
 
         Idempotent — 可以安全地多次调用，即使 sender 已异常退出。
         """
-        if not self._started and self._ws is None and self._sender_task is None:
+        if not self._started and self._ws is None and self._sender_task is None \
+                and self._receiver_task is None:
             return
 
         self._started = False
@@ -187,10 +204,12 @@ class DoubaoASRSession:
                 break
         self._audio_queue.put_nowait(None)
 
-        # 等待 sender 完成
+        # 等待 sender 和 receiver 完成
         tasks: list[asyncio.Task] = []
         if self._sender_task is not None:
             tasks.append(self._sender_task)
+        if self._receiver_task is not None:
+            tasks.append(self._receiver_task)
 
         if tasks:
             done, pending = await asyncio.wait(tasks, timeout=STOP_TIMEOUT)
@@ -204,6 +223,7 @@ class DoubaoASRSession:
                     pass
 
         self._sender_task = None
+        self._receiver_task = None
 
         # 关闭 WebSocket
         if self._ws is not None:
@@ -315,10 +335,152 @@ class DoubaoASRSession:
             self._started = False
             await self._fire_callback("error", f"Sender error: {exc}")
 
+    async def _receiver_loop(self) -> None:
+        """持续接收豆包响应，解析并回调 partial/final."""
+        response_count = 0
+        try:
+            for _ in range(2000):  # 安全上限，防止无限循环
+                if self._ws is None:
+                    break
+
+                try:
+                    resp_data = await asyncio.wait_for(
+                        self._ws.recv(), timeout=RECV_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Receiver timeout (%.0fs) after %d responses",
+                        RECV_TIMEOUT, response_count,
+                    )
+                    self._started = False
+                    await self._fire_callback(
+                        "error", f"ASR timeout after {response_count} responses"
+                    )
+                    break
+
+                response_count += 1
+                resp = parse_server_response(resp_data)
+
+                if resp["error"]:
+                    error_data = resp["data"]
+                    error_msg = error_data.get("message", str(error_data))
+                    logger.error("Doubao ASR error: %s", error_msg)
+                    self._started = False
+                    await self._fire_callback("error", f"ASR error: {error_msg}")
+                    break
+
+                # ACK 消息，跳过
+                if resp["ack"]:
+                    continue
+
+                data = resp["data"]
+                handled_final = False
+                if "result" in data:
+                    handled_final = await self._handle_result(data["result"])
+
+                if resp["is_final"]:
+                    # 发送最终的 final 事件（仅当 _handle_result 未覆盖时）
+                    final_text = "".join(self._definite_texts)
+                    elapsed = (time.monotonic() - self._start_time) * 1000
+                    logger.info(
+                        "Receiver: is_final after %d responses (%.0fms), "
+                        "text=%s",
+                        response_count, elapsed,
+                        repr(final_text[:80]) if final_text else "(empty)",
+                    )
+                    if not handled_final:
+                        # final_text 可能为空（用户按了录音但没说话），
+                        # 仍需回调让客户端知道 session 已结束
+                        await self._fire_callback("final", final_text)
+                    break
+            else:
+                # for 循环 2000 次迭代耗尽，仍未收到 is_final
+                logger.error("Receiver: hit max iteration limit (2000)")
+                self._started = False
+                await self._fire_callback(
+                    "error", "Receiver exceeded max response limit"
+                )
+
+        except websockets.exceptions.ConnectionClosed as exc:
+            logger.warning(
+                "Receiver: WS connection closed (%d responses): %s",
+                response_count, exc,
+            )
+            self._started = False
+            await self._fire_callback("error", f"Connection lost: {exc}")
+        except Exception as exc:
+            logger.error("Receiver loop error: %s", exc)
+            self._started = False
+            await self._fire_callback("error", f"Receiver error: {exc}")
+
+    async def _handle_result(self, result: dict) -> bool:
+        """处理豆包返回的 result 对象，提取 definite/pending 分句.
+
+        Returns:
+            True if a "final" callback was fired (caller should skip
+            duplicate final on is_final).
+        """
+        utterances = result.get("utterances", [])
+        fired_final = False
+
+        if utterances:
+            new_definite = False
+            pending_text = ""
+
+            for utt in utterances:
+                if utt.get("definite"):
+                    text = utt.get("text", "")
+                    if text and (
+                        not self._definite_texts
+                        or self._definite_texts[-1] != text
+                    ):
+                        self._definite_texts.append(text)
+                        new_definite = True
+                else:
+                    pending_text = utt.get("text", "")
+
+            if new_definite:
+                final_text = "".join(self._definite_texts)
+                self._log_first_result_latency("definite", final_text)
+                await self._fire_callback("final", final_text)
+                fired_final = True
+
+            if pending_text:
+                partial_text = "".join(self._definite_texts) + pending_text
+                self._log_first_result_latency("partial", partial_text)
+                await self._fire_callback("partial", partial_text)
+        else:
+            # 无 utterances 时回退到 result.text
+            text = result.get("text", "")
+            if text:
+                self._log_first_result_latency("partial", text)
+                await self._fire_callback("partial", text)
+
+        return fired_final
+
+    def _log_first_result_latency(self, label: str, text: str) -> None:
+        """记录第一次收到识别结果的延迟（仅记录一次）."""
+        if not self._first_result_time and self._first_audio_time:
+            self._first_result_time = time.monotonic()
+            latency = (self._first_result_time - self._first_audio_time) * 1000
+            logger.info(
+                "First %s result in %.0fms: %s",
+                label, latency, repr(text[:60]),
+            )
+
     async def _fire_callback(self, event_type: str, text: str) -> None:
-        """安全地调用回调函数."""
-        if self._on_result is not None:
-            try:
-                await self._on_result(event_type, text)
-            except Exception as exc:
-                logger.warning("Callback error (%s): %s", event_type, exc)
+        """安全地调用回调函数.
+
+        Error 回调是幂等的——多次调用（如 sender 和 receiver 都捕获到
+        ConnectionClosed）只会向客户端发送第一次。
+        """
+        if self._on_result is None:
+            return
+        if event_type == "error":
+            if self._error_fired:
+                return
+            self._error_fired = True
+        try:
+            await self._on_result(event_type, text)
+        except Exception as exc:
+            logger.warning("Callback error (%s): %s", event_type, exc)
