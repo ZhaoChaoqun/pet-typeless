@@ -85,7 +85,7 @@ class DoubaoASRSession:
         # 性能计时
         self._start_time: float = 0
         self._first_audio_time: float = 0
-        self._first_partial_time: float = 0
+        self._first_result_time: float = 0
         self._audio_bytes_received: int = 0
         self._audio_packets_sent: int = 0
 
@@ -101,7 +101,7 @@ class DoubaoASRSession:
         self._definite_texts = []
         self._start_time = time.monotonic()
         self._first_audio_time = 0
-        self._first_partial_time = 0
+        self._first_result_time = 0
         self._audio_bytes_received = 0
         self._audio_packets_sent = 0
         self._audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
@@ -350,6 +350,10 @@ class DoubaoASRSession:
                         "Receiver timeout (%.0fs) after %d responses",
                         RECV_TIMEOUT, response_count,
                     )
+                    self._started = False
+                    await self._fire_callback(
+                        "error", f"ASR timeout after {response_count} responses"
+                    )
                     break
 
                 response_count += 1
@@ -368,11 +372,12 @@ class DoubaoASRSession:
                     continue
 
                 data = resp["data"]
+                handled_final = False
                 if "result" in data:
-                    await self._handle_result(data["result"])
+                    handled_final = await self._handle_result(data["result"])
 
                 if resp["is_final"]:
-                    # 发送最终的 final 事件
+                    # 发送最终的 final 事件（仅当 _handle_result 未覆盖时）
                     final_text = "".join(self._definite_texts)
                     elapsed = (time.monotonic() - self._start_time) * 1000
                     logger.info(
@@ -381,7 +386,7 @@ class DoubaoASRSession:
                         response_count, elapsed,
                         repr(final_text[:80]) if final_text else "(empty)",
                     )
-                    if final_text:
+                    if final_text and not handled_final:
                         await self._fire_callback("final", final_text)
                     break
 
@@ -397,9 +402,15 @@ class DoubaoASRSession:
             self._started = False
             await self._fire_callback("error", f"Receiver error: {exc}")
 
-    async def _handle_result(self, result: dict) -> None:
-        """处理豆包返回的 result 对象，提取 definite/pending 分句."""
+    async def _handle_result(self, result: dict) -> bool:
+        """处理豆包返回的 result 对象，提取 definite/pending 分句.
+
+        Returns:
+            True if a "final" callback was fired (caller should skip
+            duplicate final on is_final).
+        """
         utterances = result.get("utterances", [])
+        fired_final = False
 
         if utterances:
             new_definite = False
@@ -419,23 +430,24 @@ class DoubaoASRSession:
 
             if new_definite:
                 final_text = "".join(self._definite_texts)
-                if not self._first_partial_time:
-                    self._first_partial_time = time.monotonic()
+                if not self._first_result_time and self._first_audio_time:
+                    self._first_result_time = time.monotonic()
                     latency = (
-                        self._first_partial_time - self._first_audio_time
+                        self._first_result_time - self._first_audio_time
                     ) * 1000
                     logger.info(
                         "First definite result in %.0fms: %s",
                         latency, repr(final_text[:60]),
                     )
                 await self._fire_callback("final", final_text)
+                fired_final = True
 
             if pending_text:
                 partial_text = "".join(self._definite_texts) + pending_text
-                if not self._first_partial_time:
-                    self._first_partial_time = time.monotonic()
+                if not self._first_result_time and self._first_audio_time:
+                    self._first_result_time = time.monotonic()
                     latency = (
-                        self._first_partial_time - self._first_audio_time
+                        self._first_result_time - self._first_audio_time
                     ) * 1000
                     logger.info(
                         "First partial result in %.0fms: %s",
@@ -446,16 +458,18 @@ class DoubaoASRSession:
             # 无 utterances 时回退到 result.text
             text = result.get("text", "")
             if text:
-                if not self._first_partial_time:
-                    self._first_partial_time = time.monotonic()
+                if not self._first_result_time and self._first_audio_time:
+                    self._first_result_time = time.monotonic()
                     latency = (
-                        self._first_partial_time - self._first_audio_time
+                        self._first_result_time - self._first_audio_time
                     ) * 1000
                     logger.info(
                         "First partial result in %.0fms: %s",
                         latency, repr(text[:60]),
                     )
                 await self._fire_callback("partial", text)
+
+        return fired_final
 
     async def _fire_callback(self, event_type: str, text: str) -> None:
         """安全地调用回调函数."""
