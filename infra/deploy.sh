@@ -64,6 +64,7 @@ az deployment sub create \
     --template-file "$SCRIPT_DIR/main.bicep" \
     --parameters "$SCRIPT_DIR/main.bicepparam" \
     --parameters doubaoAppKey="$DOUBAO_APP_KEY" doubaoAccessKey="$DOUBAO_ACCESS_KEY" apiToken="$API_TOKEN" \
+    ${DOUBAO_RESOURCE_ID:+--parameters doubaoResourceId="$DOUBAO_RESOURCE_ID"} \
     --name "pet-typeless-$(date +%Y%m%d-%H%M%S)" \
     --output table
 
