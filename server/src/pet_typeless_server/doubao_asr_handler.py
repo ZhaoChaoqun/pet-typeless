@@ -64,7 +64,7 @@ class DoubaoASRSession:
         self._access_key = access_key
         self._resource_id = resource_id
 
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: websockets.ClientConnection | None = None
         self._on_result: ResultCallback | None = None
         self._started = False
 
