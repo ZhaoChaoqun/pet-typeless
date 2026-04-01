@@ -13,6 +13,7 @@ from __future__ import annotations
 import gzip
 import json
 import struct
+from typing import Any, TypedDict
 
 # ── Header 常量 ──────────────────────────────────────────────
 
@@ -88,16 +89,17 @@ def build_audio_packet(
 # ── 消息解析 ─────────────────────────────────────────────────
 
 
-def parse_server_response(data: bytes) -> dict:
-    """解析服务端响应消息.
+class ServerResponse(TypedDict):
+    """parse_server_response 的返回类型."""
 
-    Returns:
-        dict with keys:
-        - error (bool): 是否为错误响应
-        - data (dict): 解析后的 JSON payload
-        - is_final (bool): 是否为最后一条响应
-        - ack (bool): 是否为 ACK 消息（非数据响应）
-    """
+    error: bool
+    data: dict[str, Any]
+    is_final: bool
+    ack: bool
+
+
+def parse_server_response(data: bytes) -> ServerResponse:
+    """解析服务端响应消息."""
     if len(data) < 4:
         raise ValueError(f"Response too short: {len(data)} bytes")
 
