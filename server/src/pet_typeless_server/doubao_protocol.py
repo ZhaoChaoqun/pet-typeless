@@ -139,7 +139,10 @@ def parse_server_response(data: bytes) -> ServerResponse:
         pos += 4
 
     if pos + 4 > len(data):
-        return {"error": False, "data": {}, "is_final": is_final, "ack": True}
+        raise ValueError(
+            f"Truncated response: need payload size at pos {pos}, "
+            f"have {len(data)} bytes"
+        )
 
     # 解析 payload
     payload_size = struct.unpack(">I", data[pos:pos + 4])[0]
