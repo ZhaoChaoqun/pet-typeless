@@ -2,7 +2,6 @@
 //
 // Deploys all Azure resources needed to run the PetTypeless relay server:
 //   - Resource Group
-//   - Azure Speech Services (ASR)
 //   - Azure Container Registry (Docker images)
 //   - Log Analytics Workspace (Container Apps logging)
 //   - Container Apps Environment + Container App (the server itself)
@@ -11,8 +10,6 @@
 //   az deployment sub create --location eastasia \
 //     --template-file infra/main.bicep \
 //     --parameters infra/main.bicepparam
-//
-// Note: Azure OpenAI is NOT deployed here — we reuse an existing instance.
 
 targetScope = 'subscription'
 
@@ -21,11 +18,21 @@ targetScope = 'subscription'
 @description('Azure region for all resources.')
 param location string = 'eastasia'
 
-@description('Azure OpenAI API key (from existing deployment).')
+@description('豆包 ASR app key.')
+@minLength(1)
 @secure()
-param azureOpenAiApiKey string
+param doubaoAppKey string
+
+@description('豆包 ASR access key.')
+@minLength(1)
+@secure()
+param doubaoAccessKey string
+
+@description('豆包 ASR resource ID.')
+param doubaoResourceId string = 'volc.bigasr.sauc.duration'
 
 @description('Client authentication token.')
+@minLength(1)
 @secure()
 param apiToken string
 
@@ -37,14 +44,6 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 }
 
 // ── Modules ─────────────────────────────────────────────────────
-
-module speech 'modules/speech.bicep' = {
-  name: 'speech'
-  scope: rg
-  params: {
-    location: location
-  }
-}
 
 module acr 'modules/containerRegistry.bicep' = {
   name: 'containerRegistry'
@@ -74,14 +73,10 @@ module containerApps 'modules/containerApps.bicep' = {
     acrLoginServer: acr.outputs.loginServer
     acrUsername: acr.outputs.username
     acrPassword: acr.outputs.password
-    // Speech
-    azureSpeechKey: speech.outputs.key
-    azureSpeechRegion: speech.outputs.region
-    // Azure OpenAI (reuse existing deployment)
-    azureOpenAiApiKey: azureOpenAiApiKey
-    azureOpenAiEndpoint: 'https://91313-m78jipbi-eastus2.cognitiveservices.azure.com/'
-    azureOpenAiDeployment: 'gpt-5.4-mini'
-    azureOpenAiApiVersion: '2024-10-21'
+    // 豆包 ASR
+    doubaoAppKey: doubaoAppKey
+    doubaoAccessKey: doubaoAccessKey
+    doubaoResourceId: doubaoResourceId
     // App auth
     apiToken: apiToken
   }

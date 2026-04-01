@@ -7,6 +7,7 @@ param location string
 
 // Log Analytics (for Container Apps Environment)
 param logAnalyticsCustomerId string
+@secure()
 param logAnalyticsSharedKey string
 
 // ACR credentials
@@ -15,15 +16,14 @@ param acrUsername string
 @secure()
 param acrPassword string
 
-// Application secrets
+// 豆包 ASR
 @secure()
-param azureSpeechKey string
-param azureSpeechRegion string
+param doubaoAppKey string
 @secure()
-param azureOpenAiApiKey string
-param azureOpenAiEndpoint string
-param azureOpenAiDeployment string
-param azureOpenAiApiVersion string
+param doubaoAccessKey string
+param doubaoResourceId string
+
+// App auth
 @secure()
 param apiToken string
 
@@ -65,8 +65,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       secrets: [
         { name: 'acr-password', value: acrPassword }
-        { name: 'azure-speech-key', value: azureSpeechKey }
-        { name: 'azure-openai-api-key', value: azureOpenAiApiKey }
+        { name: 'doubao-app-key', value: doubaoAppKey }
+        { name: 'doubao-access-key', value: doubaoAccessKey }
         { name: 'api-token', value: apiToken }
       ]
     }
@@ -80,12 +80,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             memory: '0.5Gi'
           }
           env: [
-            { name: 'AZURE_SPEECH_KEY', secretRef: 'azure-speech-key' }
-            { name: 'AZURE_SPEECH_REGION', value: azureSpeechRegion }
-            { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
-            { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
-            { name: 'AZURE_OPENAI_DEPLOYMENT', value: azureOpenAiDeployment }
-            { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
+            { name: 'DOUBAO_APP_KEY', secretRef: 'doubao-app-key' }
+            { name: 'DOUBAO_ACCESS_KEY', secretRef: 'doubao-access-key' }
+            { name: 'DOUBAO_RESOURCE_ID', value: doubaoResourceId }
             { name: 'API_TOKEN', secretRef: 'api-token' }
           ]
         }

@@ -12,8 +12,12 @@
 #   ./infra/deploy.sh
 #
 # Environment variables (required):
-#   AZURE_OPENAI_API_KEY  — Azure OpenAI API key
-#   API_TOKEN             — Client authentication token
+#   DOUBAO_APP_KEY     — 豆包 ASR app key
+#   DOUBAO_ACCESS_KEY  — 豆包 ASR access key
+#   API_TOKEN          — Client authentication token
+#
+# Environment variables (optional):
+#   DOUBAO_RESOURCE_ID — 豆包 resource ID (default: volc.bigasr.sauc.duration)
 
 set -euo pipefail
 
@@ -27,8 +31,13 @@ if ! command -v az &>/dev/null; then
     exit 1
 fi
 
-if [[ -z "${AZURE_OPENAI_API_KEY:-}" ]]; then
-    echo "❌ AZURE_OPENAI_API_KEY is not set" >&2
+if [[ -z "${DOUBAO_APP_KEY:-}" ]]; then
+    echo "❌ DOUBAO_APP_KEY is not set" >&2
+    exit 1
+fi
+
+if [[ -z "${DOUBAO_ACCESS_KEY:-}" ]]; then
+    echo "❌ DOUBAO_ACCESS_KEY is not set" >&2
     exit 1
 fi
 
@@ -39,7 +48,7 @@ fi
 
 SUBSCRIPTION="715d3c9c-6d19-4031-bce2-f604d10d920a"
 
-echo "🐱 PetTypeless Azure Deployment"
+echo "🐱 PetTypeless Deployment"
 echo "   Subscription: $SUBSCRIPTION"
 echo ""
 
@@ -54,7 +63,8 @@ az deployment sub create \
     --location eastasia \
     --template-file "$SCRIPT_DIR/main.bicep" \
     --parameters "$SCRIPT_DIR/main.bicepparam" \
-    --parameters azureOpenAiApiKey="$AZURE_OPENAI_API_KEY" apiToken="$API_TOKEN" \
+    --parameters doubaoAppKey="$DOUBAO_APP_KEY" doubaoAccessKey="$DOUBAO_ACCESS_KEY" apiToken="$API_TOKEN" \
+    ${DOUBAO_RESOURCE_ID:+--parameters doubaoResourceId="$DOUBAO_RESOURCE_ID"} \
     --name "pet-typeless-$(date +%Y%m%d-%H%M%S)" \
     --output table
 
