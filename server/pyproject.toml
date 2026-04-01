@@ -1,14 +1,12 @@
 [project]
 name = "pet-typeless-server"
-version = "0.1.0"
-description = "PetTypeless Relay Server — proxies client audio to Azure Speech SDK and rewrites via Azure OpenAI"
+version = "0.2.0"
+description = "PetTypeless Relay Server — proxies client audio to 豆包 bigmodel_async ASR"
 readme = { text = "", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "azure-cognitiveservices-speech>=1.42",
-    "openai>=1.60",
     "python-dotenv>=1.0",
     "websockets>=13.0",
 ]
