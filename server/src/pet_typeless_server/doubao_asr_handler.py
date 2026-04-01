@@ -298,8 +298,13 @@ class DoubaoASRSession:
                     if len(buffer) >= CHUNK_SIZE:
                         await asyncio.sleep(SEND_INTERVAL)
 
+        except websockets.exceptions.ConnectionClosed as exc:
+            logger.warning("Sender: WS connection closed: %s", exc)
+            self._started = False
+            await self._fire_callback("error", f"Connection lost: {exc}")
         except Exception as exc:
             logger.error("Sender loop error: %s", exc)
+            self._started = False
             await self._fire_callback("error", f"Sender error: {exc}")
 
     async def _fire_callback(self, event_type: str, text: str) -> None:
