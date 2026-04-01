@@ -1,5 +1,4 @@
 import Foundation
-import AVFoundation
 import os
 
 private let logger = Logger(subsystem: "com.pettypeless.app", category: "RecordingManager")
@@ -7,26 +6,20 @@ private let logger = Logger(subsystem: "com.pettypeless.app", category: "Recordi
 /// Thin coordinator that owns the FSM and delegates to focused subsystems:
 /// - `AudioEngineManager` — microphone capture
 /// - `ServerConnection` — WebSocket connection to Relay Server
-/// - `PostProcessingPipeline` — pass-through (extension point for future local processing)
 ///
 /// Thread safety:
 /// - All state transitions happen on `stateQueue` (serial).
 /// - Audio processing runs on a Core Audio thread (via AudioEngineManager tap callback).
-/// - Post-processing runs on `processingQueue`.
 /// - UI callbacks are dispatched to the main queue.
 class RecordingManager {
     static let shared = RecordingManager()
 
     private let audioEngineManager = AudioEngineManager()
     private var serverConnection: ServerConnection
-    private var postProcessingPipeline: PostProcessingPipeline
 
     /// 所有状态变更必须且只能通过此队列
     private let stateQueue = DispatchQueue(label: "com.pettypless.state")
     private var state: RecordingState = .idle
-
-    /// 计算密集型操作的队列
-    private let processingQueue = DispatchQueue(label: "com.pettypeless.processing", qos: .userInitiated)
 
     /// Flushing timeout — auto-recover if server never sends "final"
     private var flushTimeoutWorkItem: DispatchWorkItem?
@@ -48,9 +41,6 @@ class RecordingManager {
         let token = ServerConfig.apiToken
 
         serverConnection = ServerConnection(serverURL: url, apiToken: token)
-        postProcessingPipeline = PostProcessingPipeline(
-            processingQueue: processingQueue
-        )
 
         setupServerCallbacks()
 
@@ -168,9 +158,13 @@ class RecordingManager {
 
         case (.flushing, .postProcessing(let rawText)):
             cancelFlushTimeout()
-            postProcessingPipeline.process(rawText: rawText) { [weak self] finalText in
-                self?.handleEvent(.postProcessComplete(finalText: finalText))
+            let finalText: String? = rawText.isEmpty ? nil : rawText
+            if let text = finalText {
+                logger.info("最终结果: \(text, privacy: .public)")
+            } else {
+                logger.info("最终识别结果: （无）")
             }
+            self.handleEvent(.postProcessComplete(finalText: finalText))
 
         case (.postProcessing, .ready):
             if case .postProcessComplete(let finalText) = event {
