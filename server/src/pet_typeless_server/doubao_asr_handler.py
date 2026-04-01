@@ -96,6 +96,11 @@ class DoubaoASRSession:
         self._audio_packets_sent = 0
         self._audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
 
+        if not self._app_key or not self._access_key:
+            await self._fire_callback(
+                "error", "Missing doubao credentials (app_key or access_key)")
+            return
+
         connect_id = str(uuid.uuid4())
 
         headers = {
@@ -162,8 +167,11 @@ class DoubaoASRSession:
                                len(pcm16_data))
 
     async def stop(self) -> None:
-        """停止识别并释放所有资源."""
-        if not self._started:
+        """停止识别并释放所有资源.
+
+        Idempotent — 可以安全地多次调用，即使 sender 已异常退出。
+        """
+        if not self._started and self._ws is None and self._sender_task is None:
             return
 
         self._started = False

@@ -70,7 +70,7 @@ def load_settings() -> Settings:
         azure_openai_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
         azure_openai_deployment=_optional_env("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4-mini"),
         azure_openai_api_version=_optional_env("AZURE_OPENAI_API_VERSION", "2024-10-21"),
-        # 豆包 ASR
+        # 豆包 ASR（optional until switch PR makes them required）
         doubao_app_key=_optional_env("DOUBAO_APP_KEY"),
         doubao_access_key=_optional_env("DOUBAO_ACCESS_KEY"),
         doubao_resource_id=_optional_env("DOUBAO_RESOURCE_ID", "volc.bigasr.sauc.duration"),
