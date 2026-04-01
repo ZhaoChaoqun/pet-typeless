@@ -1,16 +1,15 @@
 # PetTypeless
 
-Cloud-native speech-to-text tool powered by Azure Speech SDK and Azure OpenAI. A cloud variant of [Nano Typeless](https://github.com/ZhaoChaoqun/nano-typeless).
+Cloud-native speech-to-text tool powered by 豆包 bigmodel_async ASR. A cloud variant of [Nano Typeless](https://github.com/ZhaoChaoqun/nano-typeless).
 
 ## Architecture
 
 ```
-macOS Client ← WebSocket → Relay Server ← Azure Speech SDK → Azure ASR
-                                        ← Azure OpenAI SDK → GPT rewrite
+macOS Client ← WebSocket → Relay Server ← 豆包 bigmodel_async → ASR
 ```
 
 - **`server/`** — Python FastAPI relay server (see [server/README.md](server/README.md))
-- **Client** — macOS app (coming soon)
+- **`client/`** — macOS app
 
 ## Getting Started
 

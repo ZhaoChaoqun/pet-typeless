@@ -22,7 +22,7 @@ build/
 # uv
 uv.lock
 
-# Azure Speech SDK
+# Native libraries
 *.so
 *.dylib
 
