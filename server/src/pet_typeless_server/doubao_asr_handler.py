@@ -119,7 +119,14 @@ class DoubaoASRSession:
         # 发送 Full Client Request
         request_payload = self._build_request_payload()
         full_request = build_full_client_request(request_payload)
-        await self._ws.send(full_request)
+        try:
+            await self._ws.send(full_request)
+        except Exception as exc:
+            logger.error("Failed to send Full Client Request: %s", exc)
+            await self._ws.close()
+            self._ws = None
+            await self._fire_callback("error", f"Init request failed: {exc}")
+            return
 
         # 启动 sender 协程
         self._sender_task = asyncio.create_task(self._sender_loop())
@@ -163,6 +170,10 @@ class DoubaoASRSession:
                 logger.warning("Task %s did not finish in %.0fs, cancelling",
                                t.get_name(), STOP_TIMEOUT)
                 t.cancel()
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
 
         self._sender_task = None
 
@@ -220,7 +231,8 @@ class DoubaoASRSession:
 
                 try:
                     data = await asyncio.wait_for(
-                        self._audio_queue.get(), timeout=wait_time or SEND_INTERVAL
+                        self._audio_queue.get(),
+                        timeout=wait_time if wait_time > 0 else 0.001,
                     )
                 except asyncio.TimeoutError:
                     # 超时 → 发送当前 buffer（如果有）
@@ -268,6 +280,7 @@ class DoubaoASRSession:
 
         except Exception as exc:
             logger.error("Sender loop error: %s", exc)
+            await self._fire_callback("error", f"Sender error: {exc}")
 
     async def _fire_callback(self, event_type: str, text: str) -> None:
         """安全地调用回调函数."""
