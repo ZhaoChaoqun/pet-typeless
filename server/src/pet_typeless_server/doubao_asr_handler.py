@@ -388,7 +388,9 @@ class DoubaoASRSession:
                         response_count, elapsed,
                         repr(final_text[:80]) if final_text else "(empty)",
                     )
-                    if final_text and not handled_final:
+                    if not handled_final:
+                        # final_text 可能为空（用户按了录音但没说话），
+                        # 仍需回调让客户端知道 session 已结束
                         await self._fire_callback("final", final_text)
                     break
             else:
@@ -439,46 +441,32 @@ class DoubaoASRSession:
 
             if new_definite:
                 final_text = "".join(self._definite_texts)
-                if not self._first_result_time and self._first_audio_time:
-                    self._first_result_time = time.monotonic()
-                    latency = (
-                        self._first_result_time - self._first_audio_time
-                    ) * 1000
-                    logger.info(
-                        "First definite result in %.0fms: %s",
-                        latency, repr(final_text[:60]),
-                    )
+                self._log_first_result_latency("definite", final_text)
                 await self._fire_callback("final", final_text)
                 fired_final = True
 
             if pending_text:
                 partial_text = "".join(self._definite_texts) + pending_text
-                if not self._first_result_time and self._first_audio_time:
-                    self._first_result_time = time.monotonic()
-                    latency = (
-                        self._first_result_time - self._first_audio_time
-                    ) * 1000
-                    logger.info(
-                        "First partial result in %.0fms: %s",
-                        latency, repr(partial_text[:60]),
-                    )
+                self._log_first_result_latency("partial", partial_text)
                 await self._fire_callback("partial", partial_text)
         else:
             # 无 utterances 时回退到 result.text
             text = result.get("text", "")
             if text:
-                if not self._first_result_time and self._first_audio_time:
-                    self._first_result_time = time.monotonic()
-                    latency = (
-                        self._first_result_time - self._first_audio_time
-                    ) * 1000
-                    logger.info(
-                        "First partial result in %.0fms: %s",
-                        latency, repr(text[:60]),
-                    )
+                self._log_first_result_latency("partial", text)
                 await self._fire_callback("partial", text)
 
         return fired_final
+
+    def _log_first_result_latency(self, label: str, text: str) -> None:
+        """记录第一次收到识别结果的延迟（仅记录一次）."""
+        if not self._first_result_time and self._first_audio_time:
+            self._first_result_time = time.monotonic()
+            latency = (self._first_result_time - self._first_audio_time) * 1000
+            logger.info(
+                "First %s result in %.0fms: %s",
+                label, latency, repr(text[:60]),
+            )
 
     async def _fire_callback(self, event_type: str, text: str) -> None:
         """安全地调用回调函数.
