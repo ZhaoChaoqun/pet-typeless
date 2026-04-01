@@ -43,6 +43,9 @@ CHUNK_SIZE = 3200
 # 发包间隔（秒），bigmodel_async 需要模拟实时节拍
 SEND_INTERVAL = 0.2
 
+# 音频队列最大容量（约 100 个 PCM16 chunk ≈ 20s 音频 @ 200ms/chunk）
+AUDIO_QUEUE_MAXSIZE = 100
+
 # stop() 等待 sender/receiver 完成的超时（秒）
 STOP_TIMEOUT = 15.0
 
@@ -69,7 +72,9 @@ class DoubaoASRSession:
         self._started = False
 
         # 音频发送队列，None 作为 sentinel 表示停止
-        self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(
+            maxsize=AUDIO_QUEUE_MAXSIZE
+        )
         self._sender_task: asyncio.Task | None = None
 
         # 性能计时
@@ -89,7 +94,7 @@ class DoubaoASRSession:
         self._start_time = time.monotonic()
         self._audio_bytes_received = 0
         self._audio_packets_sent = 0
-        self._audio_queue = asyncio.Queue()  # 重建队列，防止残留数据
+        self._audio_queue = asyncio.Queue(maxsize=AUDIO_QUEUE_MAXSIZE)
 
         connect_id = str(uuid.uuid4())
 
@@ -150,7 +155,11 @@ class DoubaoASRSession:
                            len(data), exc)
             return
         if pcm16_data:
-            self._audio_queue.put_nowait(pcm16_data)
+            try:
+                self._audio_queue.put_nowait(pcm16_data)
+            except asyncio.QueueFull:
+                logger.warning("Audio queue full, dropping frame (%d bytes)",
+                               len(pcm16_data))
 
     async def stop(self) -> None:
         """停止识别并释放所有资源."""
