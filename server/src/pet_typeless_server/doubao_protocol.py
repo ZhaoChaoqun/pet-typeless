@@ -27,6 +27,7 @@ MSG_SERVER_ERROR = 0xF0         # 0b1111 << 4
 
 # Message type flags (lower 4 bits of byte 1)
 FLAG_NONE = 0x00        # 0b0000
+FLAG_SEQ = 0x01         # 0b0001 (sequence number present)
 FLAG_LAST_PACK = 0x02   # 0b0010
 FLAG_FINAL = 0x03       # 0b0011 (negative seq = last response)
 
@@ -92,9 +93,10 @@ def parse_server_response(data: bytes) -> dict:
 
     Returns:
         dict with keys:
-        - error (bool)
+        - error (bool): 是否为错误响应
         - data (dict): 解析后的 JSON payload
         - is_final (bool): 是否为最后一条响应
+        - ack (bool): 是否为 ACK 消息（非数据响应）
     """
     if len(data) < 4:
         raise ValueError(f"Response too short: {len(data)} bytes")
@@ -110,12 +112,18 @@ def parse_server_response(data: bytes) -> dict:
     if msg_type == MSG_SERVER_ERROR:
         if len(data) > header_size + 4:
             payload_size = struct.unpack(">I", data[header_size:header_size + 4])[0]
-            payload_bytes = data[header_size + 4:header_size + 4 + payload_size]
+            payload_start = header_size + 4
+            if payload_start + payload_size > len(data):
+                raise ValueError(
+                    f"Truncated error payload: need {payload_size}, "
+                    f"have {len(data) - payload_start}"
+                )
+            payload_bytes = data[payload_start:payload_start + payload_size]
             if compression == COMPRESS_GZIP:
                 payload_bytes = gzip.decompress(payload_bytes)
             error_info = json.loads(payload_bytes.decode("utf-8"))
-            return {"error": True, "data": error_info, "is_final": True}
-        return {"error": True, "data": {"message": "Unknown error"}, "is_final": True}
+            return {"error": True, "data": error_info, "is_final": True, "ack": False}
+        return {"error": True, "data": {"message": "Unknown error"}, "is_final": True, "ack": False}
 
     if msg_type != MSG_SERVER_RESPONSE:
         # ACK 或其他非响应消息
@@ -124,8 +132,8 @@ def parse_server_response(data: bytes) -> dict:
     is_final = msg_flags in (FLAG_LAST_PACK, FLAG_FINAL)
     pos = header_size
 
-    # 跳过 sequence number（flags=0x01 或 0x03 时存在）
-    if msg_flags in (0x01, FLAG_FINAL):
+    # 跳过 sequence number（FLAG_SEQ 或 FLAG_FINAL 时存在）
+    if msg_flags in (FLAG_SEQ, FLAG_FINAL):
         pos += 4
 
     if pos + 4 > len(data):
@@ -134,6 +142,12 @@ def parse_server_response(data: bytes) -> dict:
     # 解析 payload
     payload_size = struct.unpack(">I", data[pos:pos + 4])[0]
     pos += 4
+
+    if pos + payload_size > len(data):
+        raise ValueError(
+            f"Truncated payload: need {payload_size}, have {len(data) - pos}"
+        )
+
     payload_bytes = data[pos:pos + payload_size]
 
     if compression == COMPRESS_GZIP:
@@ -144,7 +158,7 @@ def parse_server_response(data: bytes) -> dict:
     else:
         payload = {"raw": payload_bytes.hex()}
 
-    return {"error": False, "data": payload, "is_final": is_final}
+    return {"error": False, "data": payload, "is_final": is_final, "ack": False}
 
 
 # ── 音频格式转换 ─────────────────────────────────────────────
