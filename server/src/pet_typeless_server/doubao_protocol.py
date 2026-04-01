@@ -176,6 +176,10 @@ def float32_bytes_to_pcm16_bytes(float32_data: bytes) -> bytes:
     Returns:
         int16 little-endian PCM bytes.
     """
+    if len(float32_data) % 4 != 0:
+        raise ValueError(
+            f"float32_data length {len(float32_data)} is not a multiple of 4"
+        )
     n_samples = len(float32_data) // 4
     if n_samples == 0:
         return b""
