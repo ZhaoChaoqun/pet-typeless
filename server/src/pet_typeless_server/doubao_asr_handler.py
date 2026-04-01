@@ -89,6 +89,7 @@ class DoubaoASRSession:
         self._start_time = time.monotonic()
         self._audio_bytes_received = 0
         self._audio_packets_sent = 0
+        self._audio_queue = asyncio.Queue()  # 重建队列，防止残留数据
 
         connect_id = str(uuid.uuid4())
 
@@ -142,7 +143,12 @@ class DoubaoASRSession:
         self._audio_bytes_received += len(data)
 
         # Float32 → PCM16 转换
-        pcm16_data = float32_bytes_to_pcm16_bytes(data)
+        try:
+            pcm16_data = float32_bytes_to_pcm16_bytes(data)
+        except ValueError as exc:
+            logger.warning("Dropping malformed audio frame (%d bytes): %s",
+                           len(data), exc)
+            return
         if pcm16_data:
             self._audio_queue.put_nowait(pcm16_data)
 
