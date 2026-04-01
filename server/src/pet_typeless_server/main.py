@@ -20,8 +20,6 @@ import hmac
 import json
 import logging
 import sys
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -42,15 +40,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = load_settings()
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
-
     app = FastAPI(
         title="PetTypeless Relay Server",
         version="0.2.0",
         description="Proxies client audio to 豆包 bigmodel_async ASR.",
-        lifespan=lifespan,
     )
 
     # Stash settings on the app for access in routes
