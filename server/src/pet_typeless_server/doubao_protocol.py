@@ -121,9 +121,12 @@ def parse_server_response(data: bytes) -> ServerResponse:
                     f"have {len(data) - payload_start}"
                 )
             payload_bytes = data[payload_start:payload_start + payload_size]
-            if compression == COMPRESS_GZIP:
-                payload_bytes = gzip.decompress(payload_bytes)
-            error_info = json.loads(payload_bytes.decode("utf-8"))
+            try:
+                if compression == COMPRESS_GZIP:
+                    payload_bytes = gzip.decompress(payload_bytes)
+                error_info = json.loads(payload_bytes.decode("utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise ValueError(f"Failed to decode error payload: {e}") from e
             return {"error": True, "data": error_info, "is_final": True, "ack": False}
         return {"error": True, "data": {"message": "Unknown error"}, "is_final": True, "ack": False}
 
@@ -155,13 +158,16 @@ def parse_server_response(data: bytes) -> ServerResponse:
 
     payload_bytes = data[pos:pos + payload_size]
 
-    if compression == COMPRESS_GZIP:
-        payload_bytes = gzip.decompress(payload_bytes)
+    try:
+        if compression == COMPRESS_GZIP:
+            payload_bytes = gzip.decompress(payload_bytes)
 
-    if serialization == SERIAL_JSON:
-        payload = json.loads(payload_bytes.decode("utf-8"))
-    else:
-        payload = {"raw": payload_bytes.hex()}
+        if serialization == SERIAL_JSON:
+            payload = json.loads(payload_bytes.decode("utf-8"))
+        else:
+            payload = {"raw": payload_bytes.hex()}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise ValueError(f"Failed to decode payload: {e}") from e
 
     return {"error": False, "data": payload, "is_final": is_final, "ack": False}
 
