@@ -19,10 +19,12 @@ targetScope = 'subscription'
 param location string = 'eastasia'
 
 @description('豆包 ASR app key.')
+@minLength(1)
 @secure()
 param doubaoAppKey string
 
 @description('豆包 ASR access key.')
+@minLength(1)
 @secure()
 param doubaoAccessKey string
 
@@ -30,6 +32,7 @@ param doubaoAccessKey string
 param doubaoResourceId string = 'volc.bigasr.sauc.duration'
 
 @description('Client authentication token.')
+@minLength(1)
 @secure()
 param apiToken string
 
