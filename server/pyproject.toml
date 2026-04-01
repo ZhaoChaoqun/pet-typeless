@@ -10,6 +10,7 @@ dependencies = [
     "azure-cognitiveservices-speech>=1.42",
     "openai>=1.60",
     "python-dotenv>=1.0",
+    "websockets>=13.0",
 ]
 
 [project.scripts]

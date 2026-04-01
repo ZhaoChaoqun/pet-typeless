@@ -1,6 +1,6 @@
 """Configuration management via environment variables.
 
-All Azure credentials and server settings are loaded from
+All credentials and server settings are loaded from
 environment variables (or a .env file via python-dotenv).
 """
 
@@ -39,6 +39,11 @@ class Settings:
     azure_openai_deployment: str
     azure_openai_api_version: str
 
+    # 豆包 ASR (bigmodel_async)
+    doubao_app_key: str
+    doubao_access_key: str
+    doubao_resource_id: str
+
     # Server
     api_token: str
     host: str
@@ -65,6 +70,10 @@ def load_settings() -> Settings:
         azure_openai_endpoint=_require_env("AZURE_OPENAI_ENDPOINT"),
         azure_openai_deployment=_optional_env("AZURE_OPENAI_DEPLOYMENT", "gpt-5.4-mini"),
         azure_openai_api_version=_optional_env("AZURE_OPENAI_API_VERSION", "2024-10-21"),
+        # 豆包 ASR（optional until switch PR makes them required）
+        doubao_app_key=_optional_env("DOUBAO_APP_KEY"),
+        doubao_access_key=_optional_env("DOUBAO_ACCESS_KEY"),
+        doubao_resource_id=_optional_env("DOUBAO_RESOURCE_ID", "volc.bigasr.sauc.duration"),
         # Server
         api_token=_require_env("API_TOKEN"),
         host=_optional_env("HOST", "0.0.0.0"),
