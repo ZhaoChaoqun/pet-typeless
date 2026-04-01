@@ -7,7 +7,6 @@ enum RecordingState: Equatable, CustomStringConvertible {
     case ready                                   // 等待触发键按下
     case recording(accumulatedText: String)       // 录音中
     case flushing(accumulatedText: String)        // 正在刷出最终结果
-    case postProcessing(rawText: String)          // 后处理
 
     var description: String {
         switch self {
@@ -16,7 +15,6 @@ enum RecordingState: Equatable, CustomStringConvertible {
         case .ready: return "ready"
         case .recording: return "recording"
         case .flushing: return "flushing"
-        case .postProcessing: return "postProcessing"
         }
     }
 
@@ -51,9 +49,7 @@ enum RecordingState: Equatable, CustomStringConvertible {
                 return .flushing(accumulatedText: accText)
             }
             return nil
-        case (.flushing, .flushComplete(let rawText)):
-            return .postProcessing(rawText: rawText)
-        case (.postProcessing, .postProcessComplete):
+        case (.flushing, .flushComplete):
             return .ready
 
         default:
@@ -70,7 +66,6 @@ enum RecordingEvent: CustomStringConvertible {
     case fnKeyUp
     case partialResult(text: String, unfixedText: String?)
     case flushComplete(rawText: String)
-    case postProcessComplete(finalText: String?)
     case reloadRequested
 
     var description: String {
@@ -81,7 +76,6 @@ enum RecordingEvent: CustomStringConvertible {
         case .fnKeyUp: return "fnKeyUp"
         case .partialResult: return "partialResult"
         case .flushComplete: return "flushComplete"
-        case .postProcessComplete: return "postProcessComplete"
         case .reloadRequested: return "reloadRequested"
         }
     }

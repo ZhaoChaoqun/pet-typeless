@@ -5,14 +5,12 @@ private let logger = Logger(subsystem: "com.pettypeless.app", category: "ServerC
 
 /// Manages the shared WebSocket connection to the Relay Server.
 ///
-/// RecordingManager uses this for ASR (start/end session, audio streaming),
-/// and CloudRewriteService uses it for text rewriting.
+/// RecordingManager uses this for ASR (start/end session, audio streaming).
 /// Handles connection lifecycle, reconnection, and message routing.
 ///
 /// Thread safety:
 /// - `isConnected` and `reconnectAttempts` are protected by `stateLock`.
 /// - WebSocket operations are dispatched on `wsQueue` (serial).
-/// - Rewrite continuations are protected by `continuationLock`.
 final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Configuration
@@ -55,10 +53,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
     var onFinalResult: ((String) -> Void)?
     /// Connection state change callback
     var onConnectionStateChanged: ((Bool) -> Void)?
-
-    /// Pending rewrite continuations (keyed by request ID)
-    private var rewriteContinuations: [String: CheckedContinuation<String, Error>] = [:]
-    private let continuationLock = NSLock()
 
     // MARK: - Init
 
@@ -121,16 +115,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
             self.urlSession?.invalidateAndCancel()
             self.urlSession = nil
             self.isConnected = false
-
-            // Cancel all pending rewrite continuations
-            self.continuationLock.lock()
-            let continuations = self.rewriteContinuations
-            self.rewriteContinuations.removeAll()
-            self.continuationLock.unlock()
-
-            for (_, continuation) in continuations {
-                continuation.resume(throwing: ConnectionError.disconnected)
-            }
         }
     }
 
@@ -151,34 +135,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
             if let error = error {
                 logger.error("Failed to send audio: \(error.localizedDescription, privacy: .public)")
             }
-        }
-    }
-
-    /// Send a rewrite request and await the result.
-    func sendRewriteRequest(text: String) async throws -> String {
-        let requestId = UUID().uuidString
-
-        return try await withCheckedThrowingContinuation { continuation in
-            continuationLock.lock()
-            rewriteContinuations[requestId] = continuation
-            continuationLock.unlock()
-
-            let payload: [String: Any] = [
-                "type": "rewrite",
-                "text": text,
-                "request_id": requestId
-            ]
-
-            guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
-                  let jsonString = String(data: jsonData, encoding: .utf8) else {
-                continuationLock.lock()
-                rewriteContinuations.removeValue(forKey: requestId)
-                continuationLock.unlock()
-                continuation.resume(throwing: ConnectionError.serializationFailed)
-                return
-            }
-
-            send(text: jsonString)
         }
     }
 
@@ -236,19 +192,11 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
             logger.info("Final ASR result: \(resultText.prefix(80), privacy: .public)")
             onFinalResult?(resultText)
 
-        case "rewrite_result":
-            let resultText = json["text"] as? String ?? ""
-            let requestId = json["request_id"] as? String ?? ""
+        case "session_started":
+            logger.info("ASR session started")
 
-            continuationLock.lock()
-            let continuation = rewriteContinuations.removeValue(forKey: requestId)
-            continuationLock.unlock()
-
-            if let continuation = continuation {
-                continuation.resume(returning: resultText)
-            } else {
-                logger.warning("Received rewrite_result for unknown request_id: \(requestId, privacy: .public)")
-            }
+        case "session_ended":
+            logger.info("ASR session ended")
 
         case "error":
             let errorMsg = json["message"] as? String ?? "Unknown error"
@@ -266,16 +214,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
 
         DispatchQueue.main.async { [weak self] in
             self?.onConnectionStateChanged?(false)
-        }
-
-        // Cancel pending rewrite continuations
-        continuationLock.lock()
-        let continuations = rewriteContinuations
-        rewriteContinuations.removeAll()
-        continuationLock.unlock()
-
-        for (_, continuation) in continuations {
-            continuation.resume(throwing: ConnectionError.disconnected)
         }
 
         let currentAttempts = reconnectAttempts
@@ -310,11 +248,4 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
         logger.info("WebSocket closed: code=\(closeCode.rawValue) reason=\(reasonStr, privacy: .public)")
         handleDisconnect()
     }
-}
-
-// MARK: - Errors
-
-enum ConnectionError: Error {
-    case disconnected
-    case serializationFailed
 }
