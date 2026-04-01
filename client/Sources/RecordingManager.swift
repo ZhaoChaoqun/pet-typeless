@@ -156,18 +156,15 @@ class RecordingManager {
             serverConnection.sendEndSession()
             startFlushTimeout()
 
-        case (.flushing, .postProcessing(let rawText)):
+        case (.flushing, .ready):
             cancelFlushTimeout()
-            let finalText: String? = rawText.isEmpty ? nil : rawText
-            if let text = finalText {
-                logger.info("最终结果: \(text, privacy: .public)")
-            } else {
-                logger.info("最终识别结果: （无）")
-            }
-            self.handleEvent(.postProcessComplete(finalText: finalText))
-
-        case (.postProcessing, .ready):
-            if case .postProcessComplete(let finalText) = event {
+            if case .flushComplete(let rawText) = event {
+                let finalText: String? = rawText.isEmpty ? nil : rawText
+                if let text = finalText {
+                    logger.info("最终结果: \(text, privacy: .public)")
+                } else {
+                    logger.info("最终识别结果: （无）")
+                }
                 DispatchQueue.main.async { self.onFinalResult?(finalText) }
             }
 
