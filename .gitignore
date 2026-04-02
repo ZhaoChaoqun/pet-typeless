@@ -19,9 +19,6 @@ build/
 # macOS
 .DS_Store
 
-# uv
-uv.lock
-
 # Native libraries
 *.so
 *.dylib
