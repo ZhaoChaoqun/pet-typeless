@@ -20,6 +20,9 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
+RUN useradd --system --no-create-home app
+USER app
+
 EXPOSE 8000
 
 CMD ["pet-typeless-server"]
