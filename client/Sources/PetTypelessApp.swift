@@ -174,10 +174,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
-        RecordingManager.shared.onConnectionStateChanged = { connected in
-            NotificationCenter.default.post(name: .serverConnectionChanged, object: connected)
-        }
     }
 
     @objc func openSettings() {

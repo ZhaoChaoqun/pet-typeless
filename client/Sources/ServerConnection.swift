@@ -15,8 +15,8 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Configuration
 
-    private var serverURL: URL
-    private var apiToken: String
+    private let serverURL: URL
+    private let apiToken: String
 
     // MARK: - Connection
 
@@ -60,15 +60,6 @@ final class ServerConnection: NSObject, URLSessionWebSocketDelegate {
         self.serverURL = serverURL
         self.apiToken = apiToken
         super.init()
-    }
-
-    // MARK: - Configuration Update
-
-    func updateConfig(serverURL: URL, apiToken: String) {
-        self.serverURL = serverURL
-        self.apiToken = apiToken
-        disconnect()
-        connect()
     }
 
     // MARK: - Connection Management

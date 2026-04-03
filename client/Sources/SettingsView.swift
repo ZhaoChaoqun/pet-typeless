@@ -4,62 +4,10 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         Form {
-            SettingsServerView()
             SettingsGeneralView()
         }
         .formStyle(.grouped)
-        .frame(width: 420, height: 450)
-    }
-}
-
-/// Server 连接设置
-struct SettingsServerView: View {
-    @State private var serverURL: String = ServerConfig.serverURL.absoluteString
-    @State private var apiToken: String = ServerConfig.apiToken
-    @State private var isConnected: Bool = RecordingManager.shared.isInitialized
-
-    var body: some View {
-        Section {
-            TextField("Server URL", text: $serverURL)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: serverURL) { _, newValue in
-                    if let url = URL(string: newValue) {
-                        ServerConfig.serverURL = url
-                    }
-                }
-
-            SecureField("API Token", text: $apiToken)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: apiToken) { _, newValue in
-                    ServerConfig.apiToken = newValue
-                }
-
-            HStack {
-                Circle()
-                    .fill(isConnected ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-                Text(isConnected ? "已连接" : "未连接")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                Button("重新连接") {
-                    RecordingManager.shared.reconnect()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        } header: {
-            Text("服务器")
-        } footer: {
-            Text("连接到 PetTypeless Relay Server。语音识别和文本优化都在服务器端完成。")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .serverConnectionChanged)) { notification in
-            if let connected = notification.object as? Bool {
-                isConnected = connected
-            }
-        }
+        .frame(width: 420, height: 350)
     }
 }
 
@@ -124,15 +72,9 @@ struct SettingsGeneralView: View {
         } header: {
             Text("权限")
         } footer: {
-            Text("PetTypeless 需要辅助功能权限来监听全局按键，需要麦克风权限来录制语音。")
+            Text("Pet Typeless 需要辅助功能权限来监听全局按键，需要麦克风权限来录制语音。")
         }
     }
-}
-
-// MARK: - Notifications
-
-extension Notification.Name {
-    static let serverConnectionChanged = Notification.Name("serverConnectionChanged")
 }
 
 #Preview {

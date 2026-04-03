@@ -1,42 +1,16 @@
 import Foundation
 
-/// Server configuration management.
+/// Server configuration — hardcoded for production use.
 ///
-/// Stores Relay Server URL and API token in UserDefaults.
+/// The relay server is free and requires no user configuration.
 enum ServerConfig {
 
-    private static let serverURLKey = "serverURL"
-    private static let apiTokenKey = "apiToken"
+    /// Production WebSocket URL
+    static let serverURL = URL(string: "wss://pet-typeless-server.livelymushroom-a2d89977.eastasia.azurecontainerapps.io/ws")!
 
-    /// Default server URL for local development
-    static let defaultServerURL = URL(string: "ws://localhost:8000/ws")!
+    /// Production API token
+    static let apiToken = "Yz8FSDZ8jkwRvt4KBjq64s1xpiXOIAC0Nxt9Vy5XlBk"
 
-    /// Current server URL (from UserDefaults or default)
-    static var serverURL: URL {
-        get {
-            if let urlString = UserDefaults.standard.string(forKey: serverURLKey),
-               let url = URL(string: urlString) {
-                return url
-            }
-            return defaultServerURL
-        }
-        set {
-            UserDefaults.standard.set(newValue.absoluteString, forKey: serverURLKey)
-        }
-    }
-
-    /// Current API token (from UserDefaults)
-    static var apiToken: String {
-        get {
-            UserDefaults.standard.string(forKey: apiTokenKey) ?? ""
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: apiTokenKey)
-        }
-    }
-
-    /// Whether the server is configured (has both URL and token)
-    static var isConfigured: Bool {
-        !apiToken.isEmpty
-    }
+    /// Always configured
+    static let isConfigured = true
 }
