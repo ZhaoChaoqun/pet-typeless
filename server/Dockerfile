@@ -16,8 +16,9 @@ FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
-# Copy the virtual environment from builder
+# Copy the virtual environment and source from builder
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
 ENV PATH="/app/.venv/bin:$PATH"
 
 RUN useradd --system --no-create-home app
