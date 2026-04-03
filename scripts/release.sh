@@ -47,8 +47,8 @@ sed -i '' "s/\$(MARKETING_VERSION)/${VERSION}/g" "$APP_BUNDLE/Contents/Info.plis
 # Copy icon
 cp "$CLIENT_DIR/Sources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
 
-# Copy entitlements (for reference, not embedded by codesign here)
-# Entitlements are embedded during codesign if needed for distribution.
+# Create PkgInfo (standard macOS app identifier)
+echo -n "APPL????" > "$APP_BUNDLE/Contents/PkgInfo"
 
 echo "📦 App bundle created at: $APP_BUNDLE"
 
