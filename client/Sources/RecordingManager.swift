@@ -34,7 +34,6 @@ class RecordingManager {
     var onFinalResult: ((String?) -> Void)?
     var onRecordingStarted: (() -> Void)?
     var onProcessingStarted: (() -> Void)?
-    var onConnectionStateChanged: ((Bool) -> Void)?
 
     init() {
         let url = ServerConfig.serverURL
@@ -66,18 +65,10 @@ class RecordingManager {
         }
 
         serverConnection.onConnectionStateChanged = { [weak self] connected in
-            self?.onConnectionStateChanged?(connected)
             if connected {
                 self?.handleEvent(.modelLoaded)
             }
         }
-    }
-
-    /// Reconnect with updated server configuration
-    func reconnect() {
-        let url = ServerConfig.serverURL
-        let token = ServerConfig.apiToken
-        serverConnection.updateConfig(serverURL: url, apiToken: token)
     }
 
     // MARK: - 公开事件入口
