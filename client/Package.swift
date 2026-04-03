@@ -10,7 +10,7 @@ let package = Package(
         .executableTarget(
             name: "PetTypeless",
             path: "Sources",
-            exclude: ["PetTypeless.entitlements"]
+            exclude: ["PetTypeless.entitlements", "Info.plist", "AppIcon.icns"]
         )
     ]
 )
