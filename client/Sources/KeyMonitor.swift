@@ -172,16 +172,12 @@ class KeyMonitor {
                 DispatchQueue.main.async {
                     self.onKeyRecorded?(config)
                 }
-                return nil
             }
             return Unmanaged.passRetained(event)
         }
 
         if let pressed = triggerConfig.matches(type: type, event: event) {
             handleTriggerState(pressed: pressed)
-            if !triggerConfig.isModifierKey {
-                return nil
-            }
         }
 
         return Unmanaged.passRetained(event)
