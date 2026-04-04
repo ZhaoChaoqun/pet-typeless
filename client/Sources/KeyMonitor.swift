@@ -117,10 +117,14 @@ class KeyMonitor {
         triggerConfig = .current
         logger.info("触发键: \(self.triggerConfig.displayName, privacy: .public)")
 
+        // Use .listenOnly — we only observe the trigger key, never block/modify
+        // events. An active (.defaultTap) filter serialises every keystroke
+        // through our callback, which stalls typing system-wide whenever the
+        // main thread has any latency.
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .listenOnly,
             eventsOfInterest: eventMask,
             callback: { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
                 guard let refcon = refcon else {
@@ -168,16 +172,12 @@ class KeyMonitor {
                 DispatchQueue.main.async {
                     self.onKeyRecorded?(config)
                 }
-                return nil
             }
             return Unmanaged.passRetained(event)
         }
 
         if let pressed = triggerConfig.matches(type: type, event: event) {
             handleTriggerState(pressed: pressed)
-            if !triggerConfig.isModifierKey {
-                return nil
-            }
         }
 
         return Unmanaged.passRetained(event)
